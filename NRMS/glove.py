@@ -114,30 +114,35 @@ def generate_glove_vocab(glove_path, embedding_dim, max_vocab_size):
     :param max_vocab_size: vocab size
     :return:
     """
-    words = []
-    word2idx = {}
-    index = 1
-    embedding_vectors = bcolz.carray(np.zeros(1), rootdir=f'{glove_path}/6B.' + str(embedding_dim) + '.dat', mode='w')
-    embedding_vectors.append(np.zeros(embedding_dim))
-    with open(f'{glove_path}/glove.6B.'+str(embedding_dim)+'d.txt', 'rb') as file:
-        for line in tqdm(file):
-            line = line.decode().split()
-            word = line[0]
-            words.append(word)
-            word2idx[word] = index
-            index += 1
+    embedding_path = f'{glove_path}/6B.'+str(embedding_dim)+'_words.pkl'
+    index_path = f'{glove_path}/6B.'+str(embedding_dim)+'_idx.pkl'
+    if (not os.path.exists(embedding_path)) or (not os.path.exists(index_path)):
+        words = []
+        word2idx = {}
+        index = 1
+        embedding_vectors = bcolz.carray(np.zeros(1), rootdir=f'{glove_path}/6B.' + str(embedding_dim) + '.dat', mode='w')
+        embedding_vectors.append(np.zeros(embedding_dim))
+        with open(f'{glove_path}/glove.6B.'+str(embedding_dim)+'d.txt', 'rb') as file:
+            for line in tqdm(file):
+                line = line.decode().split()
+                word = line[0]
+                words.append(word)
+                word2idx[word] = index
+                index += 1
 
-            vec = np.array(line[1:]).astype(np.float)
-            embedding_vectors.append(vec)
-            if index > max_vocab_size:
-                break
-    embedding_vectors = bcolz.carray(embedding_vectors[1:].reshape((-1, embedding_dim)),
-                                     rootdir=f'{glove_path}/6B.' + str(embedding_dim) + '.dat',
-                                     mode='w')
-    embedding_vectors.flush()
+                vec = np.array(line[1:]).astype(np.float)
+                embedding_vectors.append(vec)
+                if index > max_vocab_size:
+                    break
+        embedding_vectors = bcolz.carray(embedding_vectors[1:].reshape((-1, embedding_dim)),
+                                         rootdir=f'{glove_path}/6B.' + str(embedding_dim) + '.dat',
+                                         mode='w')
+        embedding_vectors.flush()
 
-    pickle.dump(words, open(f'{glove_path}/6B.'+str(embedding_dim)+'_words.pkl', 'wb'))
-    pickle.dump(word2idx, open(f'{glove_path}/6B.'+str(embedding_dim)+'_idx.pkl', 'wb'))
+        pickle.dump(words, open(f'{glove_path}/6B.'+str(embedding_dim)+'_words.pkl', 'wb'))
+        pickle.dump(word2idx, open(f'{glove_path}/6B.'+str(embedding_dim)+'_idx.pkl', 'wb'))
+    else:
+        log.info("File {} and {} already downloaded".format(embedding_path, index_path))
 
 
 if __name__ == "__main__":

@@ -1,13 +1,12 @@
 import pandas as pd
-import numpy as np
 from utils.utils import tokenize_word
 import random
 import pickle
 import torch
-from torch.utils.data import Dataset
+from torch.utils import data
 
 
-class NewsDataset(Dataset):
+class NewsDataset(data.Dataset):
     def __init__(self, hyperParams, file_path):
         super(NewsDataset, self).__init__()
         self.hyperParams = hyperParams
@@ -37,7 +36,7 @@ class NewsDataset(Dataset):
             if len(title_idx) >= maxLen:
                 title_idx = title_idx[:maxLen]
             else:
-                padding = [0 for i in range(maxLen-len(title_idx))]
+                padding = [0 for _ in range(maxLen-len(title_idx))]
                 title_idx = title_idx + padding
             title_dict[id] = title_idx
         return title_dict
@@ -82,9 +81,11 @@ class NewsDataset(Dataset):
                                  "Impressions"]
         userId_clickHis = {}
         session = []
-        for i in range(user_behavior.size):
+        for i in range(user_behavior.shape[0]):
             userId, clicks, impressions = user_behavior.loc[i, "User_ID"], user_behavior.loc[i, "History"], \
                                           user_behavior.loc[i, "Impressions"]
+            if not isinstance(clicks, str):
+                continue
             clicks = clicks.split(" ")
             impressions = impressions.split(" ")
             # pos: impression==1, neg: otherwise
@@ -106,8 +107,11 @@ class NewsDataset(Dataset):
         news.columns = ["ID", "Category", "SubCategory", "Title", "Abstract", "URL", "Title_entities",
                         "Abstract_entities"]
         title_token, abstract_token = {}, {}
-        for i in range(news.size):
-            id, title, abstract = news.loc[i, "ID"], news.loc[i, "Title"].lower(), news.loc[i, "Abstract"].lower()
+        for i in range(news.shape[0]):
+            id, title, abstract = news.loc[i, "ID"], news.loc[i, "Title"], news.loc[i, "Abstract"]
+            if (not isinstance(title, str)) or (not isinstance(abstract, str)):
+                continue
+            title, abstract = title.lower(), abstract.lower()
             title_token[id] = tokenize_word(title)
             abstract_token[id] = tokenize_word(abstract)
         return title_token, abstract_token
@@ -164,13 +168,19 @@ class NewsDataset(Dataset):
         neg_num = self.hyperParams["data"]["neg_num"]
         pos_impression = self.behavior[idx][2]
         neg_impression = self.behavior[idx][3]
-        neg_sampled = random.sample(neg_impression, neg_num)
-
+        try:
+            neg_sampled = random.sample(neg_impression, neg_num)
+        except:
+            neg_sampled = neg_impression
+            random.shuffle(neg_sampled)
         candidate_titles, candidate_abstracts = [], []
         sampled_id = pos_impression + neg_sampled
         for id in sampled_id:
-            candidate_titles.append(self.title_index_dict[id])
-            candidate_abstracts.append(self.abstract_index_dict[id])
+            try:
+                candidate_titles.append(self.title_index_dict[id])
+                candidate_abstracts.append(self.abstract_index_dict[id])
+            except:
+                continue
 
         zero_padding = [0] * news_len
         if len(candidate_titles) <= neg_num:
@@ -187,3 +197,16 @@ class NewsDataset(Dataset):
         """
         label = [1] + [0] * self.hyperParams["data"]["neg_num"]
         return label
+
+
+if __name__ == "__main__":
+    from config import hyperParams
+    train_set = NewsDataset(hyperParams, "../data")
+    count = 10
+    for batch in train_set:
+        print(batch[2])
+        print(batch[4])
+        print("---------------------------")
+        if count == 0:
+            break
+        count -= 1
