@@ -1,13 +1,14 @@
 hyperParams = {
     'description': 'NRMS',
+    'version': 'v1',
     'batch_size': 32,
     'num_workers': 4,
     'shuffle': False,
-    'lr': 1e-5,
+    'lr': 5e-4,
     'glove_path': './data/glove',
-    'train_data_path': './data/train',
-    'val_data_path': './data/train',
-    'test_data_path': './data/train',
+    'train_data_path': './data',
+    'val_data_path': './data',
+    'test_data_path': './data',
     'max_vocab_size': 50000,
     'model': {
         'head_num': 10,

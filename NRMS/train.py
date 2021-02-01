@@ -2,7 +2,6 @@ import torch
 from torch.utils import data
 import pytorch_lightning as pl
 import bcolz
-from pytorch_ranger import Ranger
 
 from models.network import NRMS
 from dataset.NewsDataset import NewsDataset
@@ -22,28 +21,24 @@ class NRMSModel(pl.LightningModule):
         Load pre-trained glove embedding model
         :return: pre-trained embedding model
         """
-        embedding_size = self.hyperParams["embedding_size"]
+        embedding_size = self.hyperParams["model"]["embedding_size"]
         max_vocab_size = self.hyperParams["max_vocab_size"]
-        glove_path = self.hyperParams["max_vocab_size"]
+        glove_path = self.hyperParams["glove_path"]
         generate_glove_vocab(glove_path, embedding_size, max_vocab_size)
         embeddings = torch.Tensor(bcolz.open(f'{glove_path}/6B.'+str(embedding_size)+'.dat')[:])
         return embeddings
 
-    def setup(self, stage: str):
+    def prepare_data(self):
         """
         inherit from pytorch lightning module
-        :param stage: train / test
         :return:
         """
-        if stage == "train" or stage == "test":
-            news_dataset = NewsDataset(self.hyperParams, self.hyperParams["train_data_path"])
-            data_size = len(news_dataset)
-            train_size, val_size = int(data_size * 0.75), int(data_size * 0.15)
-            test_size = data_size - train_size - val_size
-            self.train_data, self.val_data, self.test_data = data.random_split(news_dataset, [train_size, val_size, test_size])
-        else:
-            print("Stage unknown!")
-            return
+        news_dataset = NewsDataset(self.hyperParams, self.hyperParams["train_data_path"])
+        data_size = len(news_dataset)
+        train_size, val_size = int(data_size * 0.8), int(data_size * 0.15)
+        test_size = data_size - train_size - val_size
+        self.train_data, self.val_data, self.test_data = data.random_split(news_dataset,
+                                                                           [train_size, val_size, test_size])
 
     def train_dataloader(self):
         """
@@ -79,38 +74,39 @@ class NRMSModel(pl.LightningModule):
         inherit from pytorch lightning module, configuring the optimizer
         :return: optimizer
         """
-        return Ranger(self.parameters(), lr=self.hyperParams["lr"], weight_decay=1e-5)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.hyperParams['lr'], weight_decay=1e-5)
+        return optimizer
 
     def forward(self):
         return None
 
-    def training_step(self, batch, **kwargs):
+    def training_step(self, batch, batch_idx):
         """
         inherit from pytorch lightning module, implements a mini-batch training step
         :param batch: batch data
-        :param kwargs: Potentially used arguments
+        :param batch_idx: batch index
         :return: dictionary containing loss (prediction can also be contained)
         """
         clicks_title, _, candidates_title, _, labels = batch
         loss, _ = self.model(clicks_title, candidates_title, labels)
         return {"loss": loss}
 
-    def training_epoch_end(self, output, **kwargs):
+    def training_epoch_end(self, outputs):
         """
         inherit from pytorch lightning module, implements after each epoch ends
-        :param output: List of outputs you defined in training_step
-        :param kwargs: Potentially used arguments
+        :param outputs: List of outputs you defined in training_step
         :return: dictionary containing statistics
         """
-        mean_loss = torch.stack([out['loss'] for out in output]).mean()
+        mean_loss = torch.stack([x['loss'] for x in outputs]).mean()
         self.model.eval()
-        return {'log': {'loss': mean_loss}}
+        logs = {'train_loss': mean_loss}
+        self.log_dict(logs, prog_bar=True)
 
-    def validation_step(self, batch, **kwargs):
+    def validation_step(self, batch, batch_idx):
         """
         inherit from pytorch lightning module, implements a mini-batch validation step
         :param batch: batch data
-        :param kwargs: Potentially used arguments
+        :param batch_idx: batch index
         :return: dictionary containing evaluation metrics on training step
         """
         clicks_title, _, candidates_title, _, labels = batch
@@ -155,4 +151,4 @@ class NRMSModel(pl.LightningModule):
 
         self.model.train()
 
-        return {"log": logs}
+        self.log_dict(logs, prog_bar=True)

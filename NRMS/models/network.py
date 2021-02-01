@@ -10,7 +10,7 @@ class NRMS(nn.Module):
         super(NRMS, self).__init__()
         self.hyperParams = hyperParams
         self.news_encoder = Encoder(hyperParams, weight=weight)
-        self.multi_head = nn.MultiheadAttention(hyperParams["hidden_size"], hyperParams["n_head"], dropout=0.1)
+        self.multi_head = nn.MultiheadAttention(hyperParams["hidden_size"], hyperParams["head_num"], dropout=0.1)
         self.projection = nn.Linear(hyperParams["hidden_size"], hyperParams["hidden_size"])
         self.additive_attention = AdditiveAttention(hyperParams["hidden_size"], hyperParams["q_size"])
         self.lossFn = nn.CrossEntropyLoss()
@@ -49,7 +49,6 @@ class NRMS(nn.Module):
         # evaluation
         if labels is None:
             return torch.sigmoid(prediction)
-
         # compute loss
         _, labels = labels.max(dim=1)
         loss = self.lossFn(prediction, labels)

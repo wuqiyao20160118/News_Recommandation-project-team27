@@ -18,7 +18,7 @@ class Encoder(nn.Module):
         else:
             self.embedding = nn.Embedding.from_pretrained(weight, freeze=False, padding_idx=0)
         self.multi_head_attention = nn.MultiheadAttention(hyperParams['embedding_size'],
-                                                          num_heads=hyperParams['n_head'],
+                                                          num_heads=hyperParams['head_num'],
                                                           dropout=0.1)
         self.projection = nn.Linear(hyperParams['embedding_size'], hyperParams['hidden_size'])
         self.additive_attention = AdditiveAttention(hyperParams['hidden_size'], hyperParams['q_size'])
