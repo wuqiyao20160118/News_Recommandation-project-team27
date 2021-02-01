@@ -6,19 +6,19 @@ hyperParams = {
     'shuffle': False,
     'lr': 5e-4,
     'glove_path': './data/glove',
-    'train_data_path': './data',
-    'val_data_path': './data',
-    'test_data_path': './data',
+    'train_data_path': './data/train',
+    'val_data_path': './data/val',
+    'test_data_path': './data/val',
     'max_vocab_size': 50000,
     'model': {
         'head_num': 10,
-        'embedding_size': 100,
+        'embedding_size': 300,
         'hidden_size': 300,
         'q_size': 200,
     },
     'data': {
         'pos_num': 50,
         'neg_num': 4,
-        'maxLen': 20
+        'maxLen': 30
     }
 }

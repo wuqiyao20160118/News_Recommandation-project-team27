@@ -33,12 +33,19 @@ class NRMSModel(pl.LightningModule):
         inherit from pytorch lightning module
         :return:
         """
-        news_dataset = NewsDataset(self.hyperParams, self.hyperParams["train_data_path"])
-        data_size = len(news_dataset)
-        train_size, val_size = int(data_size * 0.8), int(data_size * 0.15)
-        test_size = data_size - train_size - val_size
-        self.train_data, self.val_data, self.test_data = data.random_split(news_dataset,
-                                                                           [train_size, val_size, test_size])
+        train_news_dataset = NewsDataset(self.hyperParams, self.hyperParams["train_data_path"])
+        val_news_dataset = NewsDataset(self.hyperParams, self.hyperParams["val_data_path"])
+        self.train_data, _ = data.random_split(train_news_dataset, [int(len(train_news_dataset)*0.99),
+                                                                    len(train_news_dataset)-int(len(train_news_dataset)*0.99)])
+        self.val_data, _ = data.random_split(val_news_dataset, [int(len(val_news_dataset) * 0.95),
+                                                                    len(val_news_dataset) - int(
+                                                                        len(val_news_dataset) * 0.95)])
+        self.test_data = NewsDataset(self.hyperParams, self.hyperParams["val_data_path"])
+        # data_size = len(news_dataset)
+        # train_size, val_size = int(data_size * 0.8), int(data_size * 0.15)
+        # test_size = data_size - train_size - val_size
+        # self.train_data, self.val_data, self.test_data = data.random_split(news_dataset,
+        #                                                                    [train_size, val_size, test_size])
 
     def train_dataloader(self):
         """
