@@ -2,7 +2,7 @@ hyperParams = {
     'description': 'NRMS',
     'version': 'v1',
     'batch_size': 32,
-    'num_workers': 4,
+    'num_workers': 1,
     'shuffle': False,
     'lr': 5e-4,
     'glove_path': './data/glove',
@@ -20,5 +20,6 @@ hyperParams = {
         'pos_num': 50,
         'neg_num': 4,
         'maxLen': 30
-    }
+    },
+    'checkpoint_path': './checkpoints/NRMS/v1/epoch=3-auroc=0.71.ckpt'
 }
