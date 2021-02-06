@@ -134,3 +134,4 @@ NRMS/data/
 NRMS/news_recommadation.ipynb
 NRMS/.idea/
 NRMS/__pycache__/
+NRMS/checkpoints/

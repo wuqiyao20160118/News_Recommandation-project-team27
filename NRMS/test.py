@@ -107,7 +107,7 @@ class OnlineNRMSModel(pl.LightningModule):
         title_dict = {}
         for id in self.title_token.keys():
             title_idx = [self._word2idx(text) for text in self.title_token[id]]
-            maxLen = self.hyperParams["data"]["maxLen"]
+            maxLen = self.hyperParams["data"]["wordLen"]
             if len(title_idx) >= maxLen:
                 title_idx = title_idx[:maxLen]
             else:
@@ -124,7 +124,7 @@ class OnlineNRMSModel(pl.LightningModule):
         abstract_dict = {}
         for id in self.abstract_token.keys():
             title_idx = [self._word2idx(text) for text in self.abstract_token[id]]
-            maxLen = self.hyperParams["data"]["maxLen"]
+            maxLen = self.hyperParams["data"]["wordLen"]
             if len(title_idx) >= maxLen:
                 title_idx = title_idx[:maxLen]
             else:

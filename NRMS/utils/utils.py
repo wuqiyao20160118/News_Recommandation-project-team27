@@ -10,6 +10,13 @@ def tokenize_word(text):
 
 
 def dcg_score(y_true, y_score, k=10):
+    """
+    Discounted Cumulative Gain
+    :param y_true: true rank
+    :param y_score: actual rank
+    :param k: only consider first k elements
+    :return: DCG score
+    """
     order = np.argsort(y_score)[::-1]
     y_true = np.take(y_true, order[:k])
     gains = 2 ** y_true - 1
@@ -18,12 +25,25 @@ def dcg_score(y_true, y_score, k=10):
 
 
 def ndcg_score(y_true, y_score, k=10):
+    """
+    Normalize DCG
+    :param y_true: true rank
+    :param y_score: actual rank
+    :param k: only consider first k elements
+    :return: NDCG score
+    """
     best = dcg_score(y_true, y_true, k)
     actual = dcg_score(y_true, y_score, k)
     return actual / best
 
 
 def mrr_score(y_true, y_score):
+    """
+    Mean reciprocal rank: the reciprocal of the first correct rank
+    :param y_true: true rank
+    :param y_score: actual rank
+    :return: MRR score
+    """
     order = np.argsort(y_score)[::-1]
     y_true = np.take(y_true, order)
     rr_score = y_true / (np.arange(len(y_true)) + 1)

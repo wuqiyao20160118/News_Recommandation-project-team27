@@ -6,9 +6,9 @@ import torch
 from torch.utils import data
 
 
-class NewsDataset(data.Dataset):
+class NewsDatasetAll(data.Dataset):
     def __init__(self, hyperParams, file_path):
-        super(NewsDataset, self).__init__()
+        super(NewsDatasetAll, self).__init__()
         self.hyperParams = hyperParams
         self.file_path = file_path
         self.behavior, self.clickHis = self.init_user_behavior()
@@ -32,7 +32,7 @@ class NewsDataset(data.Dataset):
         title_dict = {}
         for id in self.title_token.keys():
             title_idx = [self._word2idx(text) for text in self.title_token[id]]
-            maxLen = self.hyperParams["data"]["wordLen"]
+            maxLen = self.hyperParams["data"]["titleLen"]
             if len(title_idx) >= maxLen:
                 title_idx = title_idx[:maxLen]
             else:
@@ -130,10 +130,12 @@ class NewsDataset(data.Dataset):
         candidate_labels = self.get_candidates_label()
         # shuffle the samples
         # tmp = list(zip(candidate_titles, candidate_labels))
-        tmp = list(zip(candidate_abstracts, candidate_labels))
+        tmp = list(zip(zip(candidate_titles, candidate_abstracts), candidate_labels))
         random.shuffle(tmp)
-        candidate_abstracts, candidate_labels = zip(*tmp)
-        return torch.tensor(click_abstracts), torch.tensor(candidate_abstracts), torch.tensor(candidate_labels)
+        candidate, candidate_labels = zip(*tmp)
+        candidate_titles, candidate_abstracts = zip(*candidate)
+        return torch.tensor(click_titles), torch.tensor(click_abstracts), \
+               torch.tensor(candidate_titles), torch.tensor(candidate_abstracts), torch.tensor(candidate_labels)
 
     def get_click_news(self, idx):
         """
@@ -151,11 +153,13 @@ class NewsDataset(data.Dataset):
         except:
             click_news_title, click_news_abstract = [], []
 
-        zero_padding = [0] * self.hyperParams["data"]["wordLen"]
+        zero_padding_title = [0] * self.hyperParams["data"]["titleLen"]
+        zero_padding_abstract = [0] * self.hyperParams["data"]["wordLen"]
         if len(click_news_title) < pos_num:
-            padding_news = [zero_padding for _ in range(pos_num-len(click_news_title))]
-            click_news_title = click_news_title + padding_news
-            click_news_abstract = click_news_abstract + padding_news
+            padding_news_title = [zero_padding_title for _ in range(pos_num-len(click_news_title))]
+            padding_news_abstract = [zero_padding_abstract for _ in range(pos_num - len(click_news_title))]
+            click_news_title = click_news_title + padding_news_title
+            click_news_abstract = click_news_abstract + padding_news_abstract
         return click_news_title, click_news_abstract
 
     def get_candidates(self, idx):
@@ -164,7 +168,8 @@ class NewsDataset(data.Dataset):
         :param idx: dataset index
         :return: candidate news
         """
-        news_len = self.hyperParams["data"]["wordLen"]
+        title_len = self.hyperParams["data"]["titleLen"]
+        abstract_len = self.hyperParams["data"]["wordLen"]
         neg_num = self.hyperParams["data"]["neg_num"]
         pos_impression = self.behavior[idx][2]
         neg_impression = self.behavior[idx][3]
@@ -182,11 +187,12 @@ class NewsDataset(data.Dataset):
             except:
                 continue
 
-        zero_padding = [0] * news_len
+        zero_padding_title, zero_padding_abstract = [0] * title_len, [0] * abstract_len
         if len(candidate_titles) <= neg_num:
-            padding_news = [zero_padding for _ in range(neg_num + 1 - len(candidate_titles))]
-            candidate_titles = candidate_titles + padding_news
-            candidate_abstracts = candidate_abstracts + padding_news
+            padding_news_title = [zero_padding_title for _ in range(neg_num + 1 - len(candidate_titles))]
+            padding_news_abstract = [zero_padding_abstract for _ in range(neg_num + 1 - len(candidate_abstracts))]
+            candidate_titles = candidate_titles + padding_news_title
+            candidate_abstracts = candidate_abstracts + padding_news_abstract
 
         return candidate_titles, candidate_abstracts
 
@@ -201,7 +207,7 @@ class NewsDataset(data.Dataset):
 
 if __name__ == "__main__":
     from config import hyperParams
-    train_set = NewsDataset(hyperParams, "../data/val")
+    train_set = NewsDatasetAll(hyperParams, "../data/val")
     count = 10
     for batch in train_set:
         print(batch[2])

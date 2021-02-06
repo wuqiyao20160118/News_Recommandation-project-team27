@@ -15,12 +15,13 @@ class NRMS(nn.Module):
         self.additive_attention = AdditiveAttention(hyperParams["hidden_size"], hyperParams["q_size"])
         self.lossFn = nn.CrossEntropyLoss()
 
-    def forward(self, clicks, candidates, labels=None):
+    def forward(self, clicks, candidates, labels=None, deep_cross=False):
         """
 
         :param clicks: [batch_size, num_clicks, seq_len]
         :param candidates: [batch_size, num_candidates, seq_len]
         :param labels: [batch_size, num_candidates]
+        :param deep_cross: whether to train a deep & cross network
         :return: eval: score with activation; train: loss, score
         """
         batch_size, num_clicks, seq_len = clicks.shape[0], clicks.shape[1], clicks.shape[2]
@@ -43,12 +44,17 @@ class NRMS(nn.Module):
         clicks = self.projection(clicks)
         clicks, _ = self.additive_attention(clicks)
 
+        # evaluation
+        if labels is None and not deep_cross:
+            # click predictor
+            prediction = torch.bmm(clicks.unsqueeze(1), candidates.permute(0, 2, 1)).squeeze(1)
+            return torch.sigmoid(prediction)
+
+        if deep_cross:
+            return clicks, candidates
+
         # click predictor
         prediction = torch.bmm(clicks.unsqueeze(1), candidates.permute(0, 2, 1)).squeeze(1)
-
-        # evaluation
-        if labels is None:
-            return torch.sigmoid(prediction)
         # compute loss
         _, labels = labels.max(dim=1)
         loss = self.lossFn(prediction, labels)

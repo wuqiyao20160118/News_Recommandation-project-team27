@@ -1,51 +1,32 @@
 import torch
 from torch.utils import data
 import pytorch_lightning as pl
-import bcolz
+import pdb
 
-from models.network import NRMS
-from dataset.NewsDataset import NewsDataset
+from models.deep_cross import DeepCross
+from dataset.NewsDatasetAll import NewsDatasetAll
 from utils.utils import ndcg_score, mrr_score
-from glove import generate_glove_vocab
 
 
-class NRMSModel(pl.LightningModule):
+class NRMSCrossModel(pl.LightningModule):
     def __init__(self, params):
-        super(NRMSModel, self).__init__()
+        super(NRMSCrossModel, self).__init__()
         self.hyperParams = params
-        self.embedding_model = self.load_embedding()
-        self.model = NRMS(params["model"], self.embedding_model)
-
-    def load_embedding(self):
-        """
-        Load pre-trained glove embedding model
-        :return: pre-trained embedding model
-        """
-        embedding_size = self.hyperParams["model"]["embedding_size"]
-        max_vocab_size = self.hyperParams["max_vocab_size"]
-        glove_path = self.hyperParams["glove_path"]
-        generate_glove_vocab(glove_path, embedding_size, max_vocab_size)
-        embeddings = torch.Tensor(bcolz.open(f'{glove_path}/6B.'+str(embedding_size)+'.dat')[:])
-        return embeddings
+        self.model = DeepCross(params)
 
     def prepare_data(self):
         """
         inherit from pytorch lightning module
         :return:
         """
-        train_news_dataset = NewsDataset(self.hyperParams, self.hyperParams["train_data_path"])
-        val_news_dataset = NewsDataset(self.hyperParams, self.hyperParams["val_data_path"])
+        train_news_dataset = NewsDatasetAll(self.hyperParams, self.hyperParams["train_data_path"])
+        val_news_dataset = NewsDatasetAll(self.hyperParams, self.hyperParams["val_data_path"])
         self.train_data, _ = data.random_split(train_news_dataset, [int(len(train_news_dataset)*0.99),
                                                                     len(train_news_dataset)-int(len(train_news_dataset)*0.99)])
         self.val_data, _ = data.random_split(val_news_dataset, [int(len(val_news_dataset) * 0.95),
                                                                     len(val_news_dataset) - int(
                                                                         len(val_news_dataset) * 0.95)])
-        self.test_data = NewsDataset(self.hyperParams, self.hyperParams["val_data_path"])
-        # data_size = len(news_dataset)
-        # train_size, val_size = int(data_size * 0.8), int(data_size * 0.15)
-        # test_size = data_size - train_size - val_size
-        # self.train_data, self.val_data, self.test_data = data.random_split(news_dataset,
-        #                                                                    [train_size, val_size, test_size])
+        self.test_data = NewsDatasetAll(self.hyperParams, self.hyperParams["val_data_path"])
 
     def train_dataloader(self):
         """
@@ -94,8 +75,8 @@ class NRMSModel(pl.LightningModule):
         :param batch_idx: batch index
         :return: dictionary containing loss (prediction can also be contained)
         """
-        clicks, candidates, labels = batch
-        loss, _ = self.model(clicks, candidates, labels)
+        clicks_title, clicks_abstract, candidates_title, candidates_abstract, labels = batch
+        loss = self.model(clicks_title, clicks_abstract, candidates_title, candidates_abstract, labels)
         return {"loss": loss}
 
     def training_epoch_end(self, outputs):
@@ -116,9 +97,9 @@ class NRMSModel(pl.LightningModule):
         :param batch_idx: batch index
         :return: dictionary containing evaluation metrics on training step
         """
-        clicks, candidates, labels = batch
+        clicks_title, clicks_abstract, candidates_title, candidates_abstract, labels = batch
         with torch.no_grad():
-            activation = self.model(clicks, candidates)
+            activation = self.model(clicks_title, clicks_abstract, candidates_title, candidates_abstract)
         mrr = 0.0
         auc = 0.0
         ndcg5, ndcg10 = 0.0, 0.0
