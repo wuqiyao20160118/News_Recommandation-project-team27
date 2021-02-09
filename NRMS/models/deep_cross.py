@@ -148,6 +148,34 @@ class PredictionLayer(nn.Module):
         return output
 
 
+class DCNPredictionLayer(nn.Module):
+    """
+      Arguments
+         - **task**: str, ``"binary"`` for  binary logloss or  ``"regression"`` for regression loss
+         - **use_bias**: bool.Whether add bias term or not.
+    """
+
+    def __init__(self, task='binary', use_bias=True, **kwargs):
+        if task not in ["binary", "multiclass", "regression"]:
+            raise ValueError("task must be binary,multiclass or regression")
+
+        super(DCNPredictionLayer, self).__init__()
+        self.use_bias = use_bias
+        self.task = task
+        if self.use_bias:
+            self.bias = nn.Parameter(torch.zeros((1,)))
+
+    def forward(self, X, labels=None):
+        output = X
+        if self.use_bias:
+            output += self.bias
+        if labels is None:
+            if self.task == "binary":
+                output = torch.sigmoid(output)
+            return output
+        return output
+
+
 class Linear(nn.Module):
     def __init__(self, feature_dim, init_std=0.0001, device='cpu'):
         super(Linear, self).__init__()
@@ -160,10 +188,140 @@ class Linear(nn.Module):
         return logit
 
 
+class DeepCrossNaive(nn.Module):
+    """
+        Instantiates the Deep&Cross Network architecture. Including DCN-V (parameterization='vector')
+            and DCN-M (parameterization='matrix').
+        :param hyperParams: hyperParameters defined in config.py
+        :param dnn_hidden_units: list,list of positive integer or empty list, the layer number and units in each layer of DNN
+        :param device: str, ``"cpu"`` or ``"cuda:0"``
+        :return: A PyTorch model instance.
+    """
+    def __init__(self, hyperParams, device='cuda:0', dnn_hidden_units=(128, 128)):
+        super(DeepCrossNaive, self).__init__()
+        self.hyperParams = hyperParams
+        self.dnn_feature_columns = [hyperParams["model"]["hidden_size"] * hyperParams["data"]["titleLen"],
+                                    hyperParams["model"]["hidden_size"] * hyperParams["data"]["wordLen"]]
+        self.dnn_hidden_units = dnn_hidden_units
+        self.reg_loss = torch.zeros((1,), device=device)
+        self.device = device
+        self.embedding_model = self.load_embedding()
+        self.embedding = nn.Embedding.from_pretrained(self.embedding_model, freeze=False, padding_idx=0)
+
+        self.cross_num = hyperParams["deep_cross"]["cross_num"]
+        self.input_dim = self.compute_input_dim()
+        self.dnn = DNN(self.input_dim, dnn_hidden_units,
+                       activation=hyperParams["deep_cross"]["dnn_activation"],
+                       use_bn=hyperParams["deep_cross"]["dnn_use_bn"],
+                       l2_reg=hyperParams["deep_cross"]["l2_reg_dnn"],
+                       dropout_rate=hyperParams["deep_cross"]["dnn_dropout"],
+                       init_std=hyperParams["deep_cross"]["init_std"], device=device)
+        if len(self.dnn_hidden_units) > 0 and self.cross_num > 0:
+            dnn_linear_in_feature = self.input_dim + dnn_hidden_units[-1]
+        elif len(self.dnn_hidden_units) > 0:
+            dnn_linear_in_feature = dnn_hidden_units[-1]
+        elif self.cross_num > 0:
+            dnn_linear_in_feature = self.input_dim
+
+        self.linear_model = Linear(self.input_dim)
+        self.dnn_linear = nn.Linear(dnn_linear_in_feature, 1, bias=False).to(device)
+
+        self.crossnet = CrossNet(in_features=self.input_dim,
+                                 layer_num=self.cross_num,
+                                 parameterization=hyperParams["deep_cross"]["cross_parameterization"], device=device)
+        self.regularization_weight = []
+        self.add_regularization_weight(
+            filter(lambda x: 'weight' in x[0] and 'bn' not in x[0], self.dnn.named_parameters()),
+            l2=hyperParams["deep_cross"]["l2_reg_dnn"])
+        self.add_regularization_weight(self.dnn_linear.weight, l2=hyperParams["deep_cross"]["l2_reg_linear"])
+        self.add_regularization_weight(self.crossnet.kernels, l2=hyperParams["deep_cross"]["l2_reg_cross"])
+
+        self.lossFn = nn.BCEWithLogitsLoss(reduction="sum")
+        self.out = DCNPredictionLayer(hyperParams["deep_cross"]["task"])
+        self.to(device)
+
+    def load_embedding(self):
+        """
+        Load pre-trained glove embedding model
+        :return: pre-trained embedding model
+        """
+        embedding_size = self.hyperParams["model"]["embedding_size"]
+        max_vocab_size = self.hyperParams["max_vocab_size"]
+        glove_path = self.hyperParams["glove_path"]
+        generate_glove_vocab(glove_path, embedding_size, max_vocab_size)
+        embeddings = torch.Tensor(bcolz.open(f'{glove_path}/6B.'+str(embedding_size)+'.dat')[:])
+        return embeddings
+
+    def compute_input_dim(self):
+        dims = 0
+        for feat_num in self.dnn_feature_columns:
+            dims += feat_num
+        return dims
+
+    def forward(self, clicks_title, clicks_abstract, labels=None):
+        """
+        Forward.
+        :param clicks_title: [batch_size, num_clicks, title_len]
+        :param clicks_abstract: [batch_size, num_clicks, seq_len]
+        :param labels: labels of the input (None represents evaluation stage.)
+        :return: Training: loss, Evaluation: prediction
+        """
+        if labels is None:
+            clicks_title = clicks_title.reshape(-1, clicks_title.shape[2])
+            clicks_abstract = clicks_abstract.reshape(-1, clicks_abstract.shape[2])
+        clicks_title = F.dropout(self.embedding(clicks_title), 0.2)
+        clicks_abstract = F.dropout(self.embedding(clicks_abstract), 0.2)
+        input = combined_dnn_input([clicks_title, clicks_abstract])
+        # b_logit
+        logit = self.linear_model(input)
+        # deep network
+        deep_out = self.dnn(input)
+        # cross network
+        cross_out = self.crossnet(input)
+        # stack the features
+        stack_out = torch.cat((cross_out, deep_out), dim=-1)
+        # W_logit * x_stack + b_logit
+        logit += self.dnn_linear(stack_out)
+
+        output = self.out(logit, labels=labels)
+        if labels is not None:
+            output = output.reshape(labels.shape)
+            output = self.lossFn(output, labels.float()) + self.get_regularization_loss()
+
+        return output
+
+    def add_regularization_weight(self, weight_list, l1=0.0, l2=0.0):
+        # For a Parameter, put it in a list to keep Compatible with get_regularization_loss()
+        if isinstance(weight_list, torch.nn.parameter.Parameter):
+            weight_list = [weight_list]
+        # For generators, filters and ParameterLists, convert them to a list of tensors to avoid bugs.
+        # e.g., we can't pickle generator objects when we save the model.
+        else:
+            weight_list = list(weight_list)
+        self.regularization_weight.append((weight_list, l1, l2))
+
+    def get_regularization_loss(self):
+        total_reg_loss = torch.zeros((1,), device=self.device)
+        for weight_list, l1, l2 in self.regularization_weight:
+            for w in weight_list:
+                if isinstance(w, tuple):
+                    parameter = w[1]  # named_parameters
+                else:
+                    parameter = w
+                if l1 > 0:
+                    total_reg_loss += torch.sum(l1 * torch.abs(parameter))
+                if l2 > 0:
+                    try:
+                        total_reg_loss += torch.sum(l2 * torch.square(parameter))
+                    except AttributeError:
+                        total_reg_loss += torch.sum(l2 * parameter * parameter)
+
+        return total_reg_loss
+
+
 class DeepCross(nn.Module):
     """
-    Instantiates the Deep&Cross Network architecture. Including DCN-V (parameterization='vector')
-        and DCN-M (parameterization='matrix').
+    Instantiates the Deep&Cross Network architecture and integrate it with NRMS
     :param hyperParams: hyperParameters defined in config.py
     :param dnn_hidden_units: list,list of positive integer or empty list, the layer number and units in each layer of DNN
     :param device: str, ``"cpu"`` or ``"cuda:0"``
@@ -361,7 +519,7 @@ def activation_layer(act_name):
 
 
 def combined_dnn_input(feature_list):
-    return torch.flatten(torch.cat(feature_list, dim=-1), start_dim=1)
+    return torch.flatten(torch.cat(feature_list, dim=1), start_dim=1)
 
 
 def combined_input(cand_list):

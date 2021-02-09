@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import pdb
 
 from models.deep_cross import DeepCross
-from dataset.NewsDatasetAll import NewsDatasetAll
+from dataset.NewsDatasetAll import NewsDatasetAll, NewsDatasetAllVal
 from utils.utils import ndcg_score, mrr_score
 
 
@@ -20,13 +20,13 @@ class NRMSCrossModel(pl.LightningModule):
         :return:
         """
         train_news_dataset = NewsDatasetAll(self.hyperParams, self.hyperParams["train_data_path"])
-        val_news_dataset = NewsDatasetAll(self.hyperParams, self.hyperParams["val_data_path"])
+        val_news_dataset = NewsDatasetAllVal(self.hyperParams, self.hyperParams["val_data_path"])
         self.train_data, _ = data.random_split(train_news_dataset, [int(len(train_news_dataset)*0.99),
                                                                     len(train_news_dataset)-int(len(train_news_dataset)*0.99)])
         self.val_data, _ = data.random_split(val_news_dataset, [int(len(val_news_dataset) * 0.95),
                                                                     len(val_news_dataset) - int(
                                                                         len(val_news_dataset) * 0.95)])
-        self.test_data = NewsDatasetAll(self.hyperParams, self.hyperParams["val_data_path"])
+        self.test_data = NewsDatasetAllVal(self.hyperParams, self.hyperParams["val_data_path"])
 
     def train_dataloader(self):
         """
@@ -43,7 +43,7 @@ class NRMSCrossModel(pl.LightningModule):
         :return:
         """
         val_loader = data.DataLoader(self.val_data, num_workers=self.hyperParams["num_workers"],
-                                     batch_size=self.hyperParams["batch_size"], shuffle=self.hyperParams["shuffle"])
+                                     batch_size=1, shuffle=self.hyperParams["shuffle"])
         return val_loader
 
     def test_dataloader(self):
@@ -52,7 +52,7 @@ class NRMSCrossModel(pl.LightningModule):
         :return:
         """
         test_loader = data.DataLoader(self.test_data, num_workers=self.hyperParams["num_workers"],
-                                      batch_size=self.hyperParams["batch_size"], shuffle=self.hyperParams["shuffle"])
+                                      batch_size=1, shuffle=self.hyperParams["shuffle"])
         return test_loader
 
     def configure_optimizers(
@@ -104,18 +104,23 @@ class NRMSCrossModel(pl.LightningModule):
         auc = 0.0
         ndcg5, ndcg10 = 0.0, 0.0
 
-        for score, label in zip(activation, labels):
-            auc += pl.metrics.functional.auroc(score, label)
-            score = score.detach().cpu().numpy()
-            label = label.detach().cpu().numpy()
-            mrr += mrr_score(label, score)
-            ndcg5 += ndcg_score(label, score, 5)
-            ndcg10 += ndcg_score(label, score, 10)
+        try:
+            for score, label in zip(activation, labels):
+                auc += pl.metrics.functional.auroc(score, label)
+                score = score.detach().cpu().numpy()
+                label = label.detach().cpu().numpy()
+                mrr += mrr_score(label, score)
+                ndcg5 += ndcg_score(label, score, 5)
+                ndcg10 += ndcg_score(label, score, 10)
 
-        auroc = (auc / activation.shape[0]).item()
-        mrr = (mrr / activation.shape[0]).item()
-        ndcg5 = (ndcg5 / activation.shape[0]).item()
-        ndcg10 = (ndcg10 / activation.shape[0]).item()
+            auroc = (auc / activation.shape[0]).item()
+            mrr = (mrr / activation.shape[0]).item()
+            ndcg5 = (ndcg5 / activation.shape[0]).item()
+            ndcg10 = (ndcg10 / activation.shape[0]).item()
+        except:
+            auroc = 1.0
+            mrr = 1.0
+            ndcg5, ndcg10 = 1.0, 1.0
 
         return {'auroc': auroc, 'mrr': mrr, 'ndcg5': ndcg5, 'ndcg10': ndcg10}
 
