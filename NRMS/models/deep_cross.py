@@ -496,6 +496,186 @@ class DeepCross(nn.Module):
         return total_reg_loss
 
 
+class DeepCrossWithCategory(nn.Module):
+    """
+    Instantiates the Deep&Cross Network architecture and integrate it with NRMS, combined with category features
+    :param hyperParams: hyperParameters defined in config.py
+    :param dnn_hidden_units: list,list of positive integer or empty list, the layer number and units in each layer of DNN
+    :param device: str, ``"cpu"`` or ``"cuda:0"``
+    :return: A PyTorch model instance.
+    """
+
+    def __init__(self, hyperParams, device='cuda:0', dnn_hidden_units=(120, 120)):
+        super(DeepCrossWithCategory, self).__init__()
+        self.hyperParams = hyperParams
+        self.dnn_feature_columns = [hyperParams["model"]["hidden_size"], hyperParams["model"]["hidden_size"]]
+        self.dnn_hidden_units = dnn_hidden_units
+        self.reg_loss = torch.zeros((1,), device=device)
+        self.device = device
+        self.embedding_model = self.load_embedding()
+
+        self.cross_num = hyperParams["deep_cross"]["cross_num"]
+        self.input_dim = self.compute_input_dim()
+        self.dnn = DNN(self.input_dim, dnn_hidden_units,
+                       activation=hyperParams["deep_cross"]["dnn_activation"],
+                       use_bn=hyperParams["deep_cross"]["dnn_use_bn"],
+                       l2_reg=hyperParams["deep_cross"]["l2_reg_dnn"],
+                       dropout_rate=hyperParams["deep_cross"]["dnn_dropout"],
+                       init_std=hyperParams["deep_cross"]["init_std"], device=device)
+        if len(self.dnn_hidden_units) > 0 and self.cross_num > 0:
+            dnn_linear_in_feature = self.input_dim + dnn_hidden_units[-1]
+        elif len(self.dnn_hidden_units) > 0:
+            dnn_linear_in_feature = dnn_hidden_units[-1]
+        elif self.cross_num > 0:
+            dnn_linear_in_feature = self.input_dim
+
+        self.news_encoder_title = Encoder(hyperParams["model"], weight=self.embedding_model)
+        self.news_encoder_abstract = Encoder(hyperParams["model"], weight=self.embedding_model)
+        self.linear_model = Linear(self.input_dim)
+        self.dnn_linear = nn.Linear(dnn_linear_in_feature, 1, bias=False).to(device)
+        self.crossnet = CrossNet(in_features=self.input_dim,
+                                 layer_num=self.cross_num,
+                                 parameterization=hyperParams["deep_cross"]["cross_parameterization"], device=device)
+        self.regularization_weight = []
+        self.add_regularization_weight(
+            filter(lambda x: 'weight' in x[0] and 'bn' not in x[0], self.dnn.named_parameters()),
+            l2=hyperParams["deep_cross"]["l2_reg_dnn"])
+        self.add_regularization_weight(self.dnn_linear.weight, l2=hyperParams["deep_cross"]["l2_reg_linear"])
+        self.add_regularization_weight(self.crossnet.kernels, l2=hyperParams["deep_cross"]["l2_reg_cross"])
+
+        self.multi_head = nn.MultiheadAttention(hyperParams["model"]["hidden_size"]*2+dnn_hidden_units[0],
+                                                hyperParams["model"]["head_num"], dropout=0.2)
+        self.projection = nn.Linear(hyperParams["model"]["hidden_size"]*2+dnn_hidden_units[0],
+                                    hyperParams["model"]["hidden_size"]*2+dnn_hidden_units[0])
+        self.additive_attention = AdditiveAttention(hyperParams["model"]["hidden_size"]*2+dnn_hidden_units[0],
+                                                    hyperParams["model"]["q_size"])
+
+        self.lossFn = nn.CrossEntropyLoss()
+        self.out = PredictionLayer(hyperParams["deep_cross"]["task"])
+        self.to(device)
+
+    def load_embedding(self):
+        """
+        Load pre-trained glove embedding model
+        :return: pre-trained embedding model
+        """
+        embedding_size = self.hyperParams["model"]["embedding_size"]
+        max_vocab_size = self.hyperParams["max_vocab_size"]
+        glove_path = self.hyperParams["glove_path"]
+        generate_glove_vocab(glove_path, embedding_size, max_vocab_size)
+        embeddings = torch.Tensor(bcolz.open(f'{glove_path}/6B.'+str(embedding_size)+'.dat')[:])
+        return embeddings
+
+    def compute_input_dim(self):
+        dims = 0
+        for feat_num in self.dnn_feature_columns:
+            dims += feat_num
+        return dims
+
+    def forward(self, clicks_title, clicks_abstract, candidates_title, candidates_abstract,
+                clicks_category_feature, labels=None):
+        """
+        Forward.
+        :param clicks_title: [batch_size, num_clicks, title_len]
+        :param candidates_title: [batch_size, num_candidates, title_len]
+        :param clicks_abstract: [batch_size, num_clicks, seq_len]
+        :param candidates_abstract: [batch_size, num_candidates, seq_len]
+        :param clicks_category_feature: [batch_size, num_clicks]
+        :param labels: labels of the input (None represents evaluation stage.)
+        :return: Training: loss, Evaluation: prediction
+        """
+        batch_size, num_clicks_title, seq_len_title = clicks_title.shape[0], clicks_title.shape[1], clicks_title.shape[2]
+        num_candidates = candidates_title.shape[1]
+        clicks_title = clicks_title.reshape(-1, seq_len_title)
+        candidates_title = candidates_title.reshape(-1, seq_len_title)
+
+        batch_size, num_clicks_abstract, seq_len_abstract = clicks_abstract.shape[0], clicks_abstract.shape[1],\
+                                                            clicks_abstract.shape[2]
+        clicks_abstract = clicks_abstract.reshape(-1, seq_len_abstract)
+        candidates_abstract = candidates_abstract.reshape(-1, seq_len_abstract)
+
+        feature_title = self.news_encoder_title(clicks_title)
+        feature_abstract = self.news_encoder_abstract(clicks_abstract)
+        candidates_title = self.news_encoder_title(candidates_title)
+        candidates_abstract = self.news_encoder_abstract(candidates_abstract)
+        feature_title = feature_title.reshape(batch_size, num_clicks_title, -1)
+        candidates_title = candidates_title.reshape(batch_size, num_candidates, -1)
+        feature_abstract = feature_abstract.reshape(batch_size, num_clicks_abstract, -1)
+        candidates_abstract = candidates_abstract.reshape(batch_size, num_candidates, -1)
+
+        input = combined_input([feature_title, feature_abstract])
+        candidates = combined_input([candidates_title, candidates_abstract])
+
+        # category-based attention
+        clicks_category_feature = F.softmax(clicks_category_feature, dim=-1).unsqueeze(dim=-1)
+        input = input * clicks_category_feature
+        candidates = candidates / num_candidates
+
+        input = input.reshape(batch_size*num_clicks_abstract, -1)
+        candidates = candidates.reshape((batch_size*num_candidates, -1))
+
+        # deep network
+        deep_out = self.dnn(input)
+        # cross network
+        cross_out = self.crossnet(input)
+        # stack the features
+        stack_out = torch.cat((cross_out, deep_out), dim=-1)
+
+        deep_out_cand = self.dnn(candidates)
+        # cross network
+        cross_out_cand = self.crossnet(candidates)
+        # stack the features
+        stack_out_cand = torch.cat((cross_out_cand, deep_out_cand), dim=-1)
+
+        stack_out = stack_out.reshape(batch_size, num_clicks_abstract, -1)
+        stack_out_cand = stack_out_cand.reshape(batch_size, num_candidates, -1)
+
+        # multi-head attention
+        clicks = stack_out.permute(1, 0, 2)
+        clicks, _ = self.multi_head(clicks, clicks, clicks)
+        clicks = F.dropout(clicks.permute(1, 0, 2), p=0.2)
+
+        # additive attention
+        clicks = self.projection(clicks)
+        clicks, _ = self.additive_attention(clicks)
+
+        # pdb.set_trace()
+        output = self.out(clicks, stack_out_cand, labels=labels)
+        if labels is not None:
+            # compute loss
+            _, labels = labels.max(dim=1)
+            output = self.lossFn(output, labels) + self.get_regularization_loss()
+        return output
+
+    def add_regularization_weight(self, weight_list, l1=0.0, l2=0.0):
+        # For a Parameter, put it in a list to keep Compatible with get_regularization_loss()
+        if isinstance(weight_list, torch.nn.parameter.Parameter):
+            weight_list = [weight_list]
+        # For generators, filters and ParameterLists, convert them to a list of tensors to avoid bugs.
+        # e.g., we can't pickle generator objects when we save the model.
+        else:
+            weight_list = list(weight_list)
+        self.regularization_weight.append((weight_list, l1, l2))
+
+    def get_regularization_loss(self):
+        total_reg_loss = torch.zeros((1,), device=self.device)
+        for weight_list, l1, l2 in self.regularization_weight:
+            for w in weight_list:
+                if isinstance(w, tuple):
+                    parameter = w[1]  # named_parameters
+                else:
+                    parameter = w
+                if l1 > 0:
+                    total_reg_loss += torch.sum(l1 * torch.abs(parameter))
+                if l2 > 0:
+                    try:
+                        total_reg_loss += torch.sum(l2 * torch.square(parameter))
+                    except AttributeError:
+                        total_reg_loss += torch.sum(l2 * parameter * parameter)
+
+        return total_reg_loss
+
+
 def activation_layer(act_name):
     """Construct activation layers
     Args:

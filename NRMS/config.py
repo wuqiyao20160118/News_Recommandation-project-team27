@@ -1,6 +1,6 @@
 hyperParams = {
     'description': 'NRMS',
-    'version': 'v5',
+    'version': 'category',
     'batch_size': 32,
     'num_workers': 1,
     'shuffle': False,
@@ -35,5 +35,5 @@ hyperParams = {
         'dnn_use_bn': False,
         'task': 'binary'
     },
-    'checkpoint_path': './checkpoints/NRMS/v1/epoch=3-auroc=0.71.ckpt'
+    'checkpoint_path': './checkpoints/NRMS/v5/epoch=8-auroc=0.71.ckpt'
 }

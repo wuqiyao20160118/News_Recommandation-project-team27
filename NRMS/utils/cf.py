@@ -10,6 +10,7 @@ from collections import defaultdict
 import collections
 from tqdm import tqdm
 
+
 def reduce_mem(df):
     starttime = time.time()
     numerics = ['int16', 'int32', 'int64', 'float16', 'float32', 'float64']
@@ -142,6 +143,32 @@ def get_user_label(df):
     return user_label_dict
 
 
+def get_news_category(hyperParams, stage="train"):
+    assert stage in ["train", "val", "test"]
+    file_path = hyperParams[stage + "_data_path"]
+    path = file_path + "/news.tsv"
+    news = pd.read_csv(path, header=None, sep='\t')
+    news.columns = ["ID", "Category", "SubCategory", "Title", "Abstract", "URL", "Title_entities",
+                        "Abstract_entities"]
+    id2category = {}
+    for i in range(news.shape[0]):
+        id, category =  news.loc[i, "ID"], news.loc[i, "Category"]
+        if not isinstance(category, str):
+            continue
+        category = category.lower()
+        id2category[id] = category
+    return id2category
+
+
+def merge_category_map(train_map, test_map):
+    category_map = {}
+    for k, v in train_map.items():
+        category_map[k] = v
+    for k, v in test_map.items():
+        category_map[k] = v
+    return category_map
+
+
 def item_based_recommend(user_id, user_item_time_dict, item2item_sim, sim_item_topk, recall_item_num, item_topk_click):
     """
         recall based on itemCF
@@ -188,87 +215,49 @@ def item_based_recommend(user_id, user_item_time_dict, item2item_sim, sim_item_t
 
 
 def itemcf(df, item_count_map, save_path):
-    # 定义
     user_recall_items_dict = collections.defaultdict(dict)
-    # 获取 用户 - 文章 - 点击时间的字典
     user_item_time_dict = get_user_item_time(df)
-    # 去取文章相似度
     item2item_sim = pickle.load(open(save_path + 'itemcf_item2item_sim.pkl', 'rb'))
-    # 相似文章的数量
     sim_item_topk = 10
-    # 召回文章数量
     recall_item_num = 10
-    # 用户热度补全
     item_topk_click = get_item_topk_click(item_count_map, k=50)
     for user in tqdm(df['User_ID'].unique()):
-        user_recall_items_dict[user] = item_based_recommend(user, user_item_time_dict, item2item_sim, 
-                                                            sim_item_topk, recall_item_num, item_topk_click)
+        user_recall_items_dict[user] = item_based_recommend(user, user_item_time_dict, item2item_sim, sim_item_topk, recall_item_num, item_topk_click)
     return user_recall_items_dict
 
 
-def dcg_score(y_true, y_actual, k=10):
-    """
-    Discounted Cumulative Gain
-    :param y_true: true rank
-    :param y_actual: actual rank
-    :param k: only consider first k elements
-    :return: DCG score
-    """
-    order = np.argsort(y_score)[::-1]
-    y_true = np.take(y_true, order[:k])
-    gains = 2 ** y_true - 1
-    discounts = np.log2(np.arange(len(y_true)) + 2)
-    return np.sum(gains / discounts)
-
-
-def get_recall_df(user_recall_items_dict):
+def get_recall_df(user_recall_items_dict, category_map):
     user_item_score_list = []
+    category_count = defaultdict(int)
     for user, items in tqdm(user_recall_items_dict.items()):
-        item_list = []
+        item_list, category_list = [], []
         for item, _ in items:
             item_list.append(item)
-        user_item_score_list.append([user, item_list])
-    recall_df = pd.DataFrame(user_item_score_list, columns=['user_id', 'click_article_id'])
+            category_list.append(category_map[item])
+            category_count[category_map[item]] += 1
+        max_category, max_count = "", -1
+        for k, v in category_count.items():
+            if max_count < v:
+                max_count = v
+                max_category = k
+        user_item_score_list.append([user, item_list, category_list, max_category])
+    recall_df = pd.DataFrame(user_item_score_list, columns=['user_id', 'click_article_id', 'category', 'most category'])
     return recall_df
 
 
-def get_label_df(user_label_dict):
+def get_label_df(user_label_dict, category_map):
     user_label_list = []
+    category_count = defaultdict(int)
     for user, items in tqdm(user_label_dict.items()):
-        user_label_list.append([user, items])
-    label_df = pd.DataFrame(user_label_list, columns=['user_id', 'click_article_id'])
+        category_list = []
+        for item in items:
+            category_list.append(category_map[item])
+            category_count[category_map[item]] += 1
+        max_category, max_count = "", -1
+        for k, v in category_count.items():
+            if max_count < v:
+                max_count = v
+                max_category = k
+        user_label_list.append([user, items, category_list, max_category])
+    label_df = pd.DataFrame(user_label_list, columns=['user_id', 'click_article_id', 'category', 'most category'])
     return label_df
-
-# def ndcg_score(y_true, y_actual, k=10):
-#     """
-#     Normalize DCG
-#     :param y_true: true rank
-#     :param y_actual: actual rank
-#     :param k: only consider first k elements
-#     :return: NDCG score
-#     """
-#     best = dcg_score(y_true, y_true, k)
-#     actual = dcg_score(y_true, y_score, k)
-#     return actual / best
-
-
-# def mrr_score(y_true, y_actual):
-#     """
-#     Mean reciprocal rank: the reciprocal of the first correct rank
-#     :param y_true: true rank
-#     :param y_actual: actual rank
-#     :return: MRR score
-#     """
-#     order = np.argsort(y_score)[::-1]
-#     y_true = np.take(y_true, order)
-#     rr_score = y_true / (np.arange(len(y_true)) + 1)
-#     return np.sum(rr_score) / np.sum(y_true)
-
-# def calculate_metrics(user_recall_items_dict, user_label_dict):
-#     mrr = 0.0
-#     ndcg5, ndcg10 = 0.0, 0.0
-#     for user, items in tqdm(user_recall_items_dict.items()):
-#         mrr += utils.mrr_score(label, score)
-#         ndcg5 += utils.ndcg_score(label, score, 5)
-#         ndcg10 += utils.ndcg_score(label, score, 10)
-        
