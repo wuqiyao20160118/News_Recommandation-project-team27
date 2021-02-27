@@ -31,7 +31,7 @@ def train():
         version=hyperParams["version"]
     )
     trainer = Trainer(
-        resume_from_checkpoint='/mnt/NRMS/lightning_logs/NRMS/v5/epoch=1-auroc=0.70.ckpt',
+        resume_from_checkpoint="/mnt/NRMS/lightning_logs/NRMS/v5/last.ckpt",
         max_epochs=300,
         gpus=1,
         callbacks=[early_stop_config, checkpoints],

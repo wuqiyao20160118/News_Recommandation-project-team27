@@ -35,5 +35,7 @@ hyperParams = {
         'dnn_use_bn': False,
         'task': 'binary'
     },
-    'checkpoint_path': './checkpoints/NRMS/v5/epoch=8-auroc=0.71.ckpt'
+    'checkpoint_path_category': './checkpoints/NRMS/category/epoch=6-auroc=0.71.ckpt',
+    'checkpoint_path': './checkpoints/NRMS/v5/epoch=8-auroc=0.71.ckpt',
+    'checkpoint_path_title': './checkpoints/NRMS/v1/epoch=3-auroc=0.71.ckpt',
 }
