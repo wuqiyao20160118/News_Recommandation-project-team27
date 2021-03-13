@@ -131,6 +131,5 @@ dmypy.json
 # NRMS
 NRMS/.ipynb_checkpoints/
 NRMS/data/
-NRMS/news_recommadation.ipynb
 NRMS/.idea/
 NRMS/__pycache__/
