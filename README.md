@@ -54,6 +54,7 @@ All the checkpoints can be downloaded from here: https://drive.google.com/drive/
 >   + utils  
 >     + cf.py  
 >     + utils.py  
+> 	+ news_recommandation.ipynb  
 > + config.py    
 > + glove.py  
 > + main.py  
@@ -66,7 +67,6 @@ All the checkpoints can be downloaded from here: https://drive.google.com/drive/
 > + train_category.py  
 > + train_deep_cross.py  
 > + train_naive_deep_cross.py  
-> + news_recommandation.ipynb
 ## File brief description
 + **checkpoints**: directory to save checkpoints while training and load the corresponding checkpoint configured in config.py while performing online inference  
 + **data**: directory to save data  
