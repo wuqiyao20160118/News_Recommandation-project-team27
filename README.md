@@ -26,7 +26,8 @@ pip install -r requirement.txt
 5. create folders  
 ``` bash
 cd NRMS
-mkdir checkpoints
+mkdir checkpoints  
+mkdir data  
 ```  
 6. download data and checkpoints to the corresponding folder  
 > MIND data and glove embeddings we use in this project can be downloaded from here: https://drive.google.com/drive/folders/1BUk_CmsdBl2F7ihswvxDRcEUtSGFiSzf?usp=sharing  
